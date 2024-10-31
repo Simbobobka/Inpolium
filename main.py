@@ -7,18 +7,19 @@ import sys
 from bs4 import BeautifulSoup
 from pathlib import Path
 
-url = [
+url_list = [
     "https://store.igefa.de/p/clean-and-clever-smartline-seifencr-me-ros-sma-91-1-sma91-1-seifencreme-12x500ml/k9UiS8fZKdKxrhxcZGuqx7",
     "https://store.igefa.de/p/kolibri-comface-mundschutz-3-lagig-typ-iir-en-14683-typ-iir-40/GyXZ2QS4JRzY9isZWkHU4V",
     "https://store.igefa.de/p/hydrovital-classic-duschgel-hydrovital-classic-duschgel-250-ml-eine-erfrischende-reinigung-fuer-jeden-tag-250-ml/Np2oJkZtF58QNBQnnLd8B5"   
     ]
+
 CSV_OUTPUT = "scraped_data.csv"
 PROGRESS_FILE = "progress.json"
 SUPPLIER = "igefa Handelsgesellschaft"
+INTERMEDIATE_FILE = "intermediate_data.json"
 
 # write to csv
 def save_to_csv(filename, data, mode="a"):
-    # Ensure the directory exists
     Path(filename).parent.mkdir(parents=True, exist_ok=True)
 
     file_exists = Path(filename).exists()
@@ -29,26 +30,58 @@ def save_to_csv(filename, data, mode="a"):
         if not file_exists:
             writer.writeheader()
         
-        # Write the data row
         writer.writerow(data)
+
+def save_progress(url):
+    if Path(PROGRESS_FILE).exists():
+        with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
+            progress_data = json.load(f)
+    else:
+        progress_data = []
+
+    progress_data.append(url)
+
+    with open(PROGRESS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(progress_data, f, indent=2)
 
 # Load progress
 def load_progress():
-    if not Path(PROGRESS_FILE).exists():
-        with open(PROGRESS_FILE, 'w', encoding='utf-8') as f:
-            json.dump([], f)  
-        return []
+    if Path(PROGRESS_FILE).exists():
+        with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
+            return set(json.load(f))
+    return set()
 
-    with open(PROGRESS_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
+# save to extra dataset
+def save_to_intermediate(data):
+    if Path(INTERMEDIATE_FILE).exists():
+        with open(INTERMEDIATE_FILE, 'r', encoding='utf-8') as f:
+            existing_data = json.load(f)
+    else:
+        existing_data = []
 
-# Save progress
-def save_progress(url):
-    progress = load_progress()
-    if url not in progress:  # Prevent duplicates
-        progress.append(url)
-        with open(PROGRESS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(progress, f)
+    existing_data.append(data)
+
+    with open(INTERMEDIATE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(existing_data, f, indent=2, ensure_ascii=False)
+
+# Load from JSON to main CSV
+def flush_to_csv():
+    if not Path(INTERMEDIATE_FILE).exists():
+        return
+    
+    with open(INTERMEDIATE_FILE, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    # Write to CSV
+    with open(CSV_OUTPUT, "a", newline='', encoding="utf-8") as csvfile:
+        if data:
+            fieldnames = data[0].keys()
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            if csvfile.tell() == 0:
+                writer.writeheader()
+            
+            writer.writerows(data)
 
 async def fetch_html(session, url):
     async with session.get(url) as response:
@@ -132,36 +165,34 @@ async def scrape_page(session, url):
             "Manufacturer": manufacturer,
             "Original Data Column 3 (Add. Description)": additional_description if additional_description else None,
         }
-        
         save_progress(url)
-        save_to_csv(CSV_OUTPUT, product_data)
+        save_to_intermediate(product_data)
         print(f"Successfully scraped {url}")
+
     except Exception as e:
         print(f"Error scraping {url}: {e}")
-        save_progress(url)
 
 # run main scrape proces
 async def main():
-    # Load previously scraped URLs
-    scraped_urls = load_progress()
+    processed_urls = load_progress()
+    urls_to_process = [url for url in url_list if url not in processed_urls]
+
+    if not urls_to_process:
+        print("All URLs have been processed.")
+        return
+
     async with aiohttp.ClientSession() as session:
-        tasks = []
-        for link in url:
-            if link not in scraped_urls:  # Only scrape if not already done
-                tasks.append(scrape_page(session, link))
-            else:
-                print(f"Already scraped {link}, skipping...")
+        tasks = [scrape_page(session, url) for url in urls_to_process]
         await asyncio.gather(*tasks)
+    
+    flush_to_csv()
 
 # start program
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nProgram interrupted! Exiting...")
-        sys.exit(0)
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
-        sys.exit(1)
+        print("\nProgram interrupted! Flushing intermediate data to CSV...")
+        flush_to_csv() 
 
 
