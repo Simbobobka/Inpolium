@@ -54,10 +54,10 @@ cover/
 # Translations
 *.mo
 *.pot
-*.json
+
 # Scrapy stuff:
 .scrapy
-*.csv
+
 # Sphinx documentation
 docs/_build/
 
