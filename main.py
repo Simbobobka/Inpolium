@@ -3,20 +3,15 @@ import asyncio
 import csv
 import re
 import json
-import sys
 from bs4 import BeautifulSoup
 from pathlib import Path
 
-url_list = [
-    "https://store.igefa.de/p/clean-and-clever-smartline-seifencr-me-ros-sma-91-1-sma91-1-seifencreme-12x500ml/k9UiS8fZKdKxrhxcZGuqx7",
-    "https://store.igefa.de/p/kolibri-comface-mundschutz-3-lagig-typ-iir-en-14683-typ-iir-40/GyXZ2QS4JRzY9isZWkHU4V",
-    "https://store.igefa.de/p/hydrovital-classic-duschgel-hydrovital-classic-duschgel-250-ml-eine-erfrischende-reinigung-fuer-jeden-tag-250-ml/Np2oJkZtF58QNBQnnLd8B5"   
-    ]
 
 CSV_OUTPUT = "scraped_data.csv"
 PROGRESS_FILE = "progress.json"
 SUPPLIER = "igefa Handelsgesellschaft"
 INTERMEDIATE_FILE = "intermediate_data.json"
+MAIN_URL = "https://store.igefa.de/c/kategorien/f4SXre6ovVohkGNrAvh3zR?page="
 
 # write to csv
 def save_to_csv(filename, data, mode="a"):
@@ -92,7 +87,6 @@ async def scrape_page(session, url):
     try:
         html = await fetch_html(session, url)
         soup = BeautifulSoup(html, "html.parser")
-        
         # Extract the first product element 
         product = soup.find("div", class_="LYSContainer_padding__21b81") 
         if product is None:
@@ -171,20 +165,44 @@ async def scrape_page(session, url):
 
     except Exception as e:
         print(f"Error scraping {url}: {e}")
+        
+async def fetch_product_urls(session, page_num):
+    url = f"{MAIN_URL}{page_num}"
+    html = await fetch_html(session, url)
+    soup = BeautifulSoup(html, "html.parser")
+    print(f"Fetching product URLs from page {page_num}")
 
-# run main scrape proces
+    # Extract product URLs using JSON data in the script tag
+    script_tag = soup.find("script", id="__NEXT_DATA__")
+    json_data = json.loads(script_tag.string)
+    products = json_data.get("props", {}).get("initialProps", {}).get("pageProps", {}).get("initialProductData", {}).get("hits", [])
+    
+    urls = []
+    for product in products:
+        attachments = product.get("mainVariant", {})
+        product_url = f"https://store.igefa.de/p/{attachments['slug']}/{attachments['id']}"
+        urls.append(product_url)
+    return urls
+
+# Main scraping logic
 async def main():
     processed_urls = load_progress()
-    urls_to_process = [url for url in url_list if url not in processed_urls]
-
-    if not urls_to_process:
-        print("All URLs have been processed.")
-        return
-
+    page_num = 1
+    max_pages = 500
     async with aiohttp.ClientSession() as session:
-        tasks = [scrape_page(session, url) for url in urls_to_process]
-        await asyncio.gather(*tasks)
-    
+        while page_num <= max_pages:
+            product_urls = await fetch_product_urls(session, page_num)
+            urls_to_process = [url for url in product_urls if url not in processed_urls]
+            
+            if not urls_to_process:
+                print(f"All URLs on page {page_num} have been processed.")
+                page_num += 1
+                continue
+            
+            tasks = [scrape_page(session, url) for url in urls_to_process]
+            await asyncio.gather(*tasks)
+            page_num += 1
+
     flush_to_csv()
 
 # start program
