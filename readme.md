@@ -50,6 +50,9 @@ Successfully scraped https://store.igefa.de/p/clean-and-clever-smartline-muellbe
 
 Program interrupted! Flushing intermediate data to CSV...
 ```
+
+#### Output example
+Check ```scrape_data.csv``` file. Script run until scrape all goods from site or being stopped. For example included, I parsed 12 pages from 500 available, in each page are 20 goods, so 12 * 20 = 240 records.
 #### Contact information
 
 - Phone: 093 489 3704
